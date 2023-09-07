@@ -2,7 +2,7 @@
 library(MASS)
 library(ggplot2)
 #locations 
-n = 100 # datapoints
+n = 1000 # datapoints
 #sx = c(runif(n/8,0,0.05),runif(n/8,0.6,1),runif(n/2,0.6,1),runif(n/4,0,0.4))
 #sy = c(runif(n/8,0,0.05),runif(n/8,0.6,1),runif(n/2,0,0.4),runif(n/4,0.6,1))
 
@@ -11,15 +11,47 @@ sx = runif(n)
 sy = runif(n)
 
 s = cbind(sy,sx)
+dist = sapply(1:n,function(x) sapply(1:n,function(y) sqrt(sum((s[y,]-s[x,])^2))))
 
 # creating correlation matrix
-phi = 0.002
+phi = 30
 
 #range
-3/phi
+range = 0.03
+phi = 3/range
 
-sigma = sapply(1:n,function(x) sapply(1:n,function(y) exp(-phi*sqrt(sum((s[y,]-s[x,])^2)))))
+sigma = exp(-phi*dist)
 
+
+## simulating some data
+# possible y
+
+y = rep(1,n)
+
+idx = which(sx < 0.75 & sx > 0.25 & sy >0.25 & sy < 0.75)
+
+
+y[idx] = 2
+
+yobs = y + rnorm(n,0,0.5)
+
+sigmanorm = diag(1/rowSums(sigma))%*%sigma
+znew = c(sigmanorm%*%yobs)
+
+#zval_spatial = colMeans(mvrnorm(n=10,yobs,sigma))
+
+#zval_independent = colMeans(mvrnorm(n=10,yobs,diag(n)))
+
+
+plotdata = data.frame(yobs,znew, s, id = 1:n)
+datalong = reshape(plotdata, varying = colnames(plotdata)[c(1:2)], direction = "long", v.names = 'obs', times = c('original observation','spatial information through gp'))
+
+ggplot(datalong, aes(x = sx, y = sy, col = obs))+
+  geom_point(cex = 2)+
+  facet_grid(cols = vars(time))
+
+length(znew)
+dim(s)
 Tdata = 1000
 #cdf_mu = rbeta(1,1,2)
 
@@ -33,22 +65,11 @@ ggplot(plotdata, aes(x=sx,y = sy, col = zval, label = id))+
   geom_point(cex = 2)
   geom_text(hjust = 0, vjust = 0)
 
-# possible y
-y = rep(1,n)
-
-idx = which(sx < 0.75 & sx > 0.25 & sy >0.25 & sy < 0.75)
 
 
-y[idx[1:12]] = 1.1
-
-zval_spatial = exp(colMeans(mvrnorm(n=100,y,sigma)))
-zval_independent = exp(colMeans(mvrnorm(n=100,y,diag(n))))
-
-
-plotdata = data.frame(zval,zval_ind,s, id = 1:n)
-
-ggplot(plotdata, aes(x=sx,y = sy, col = zval, label = id))+
+ggplot(plotdata, aes(x=sx,y = sy, col = zval_spatial, label = id))+
   geom_point(cex = 2)
 
-ggplot(plotdata, aes(x=sx,y = sy, col = zval_ind, label = id))+
+ggplot(plotdata, aes(x=sx,y = sy, col = zval_independent, label = id))+
   geom_point(cex = 2)
+rgamma(100,1,1)
