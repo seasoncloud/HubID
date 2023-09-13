@@ -32,7 +32,7 @@ phi = 3/range
 sigma = exp(-phi*dist)
 
 sigmanorm = diag(1/rowSums(sigma))%*%sigma
-weight = c(sigmanorm%*%yobs)
+weight = exp(c(sigmanorm%*%log(yobs)))
 
 # gaussian mean
 range = 1
@@ -44,7 +44,7 @@ zval = mvrnorm(n=2,yobs,sigma)
 gp_mean = colMeans(zval)
 gp_median = apply(zval,2,median)
 
-# make it correlated
+# make it correlated eigenvalue
 range = 0.05
 phi = 3/range
 sigma = exp(-phi*dist)
@@ -54,13 +54,24 @@ L = eig$vectors%*%diag(sqrt(eig$values))%*%t(eig$vectors)
 
 ycorr = L%*%yobs
 
+# make it correlated cholesky
+#range = exp(0.1)
+range = 0.1
+phi = 3/range
+sigma = exp(-phi*dist)
+chol= chol(sigma)
+
+L = eig$vectors%*%diag(sqrt(eig$values))%*%t(eig$vectors)
+
+#ychol = exp(t(chol)%*%log(yobs))
+ychol = t(chol)%*%yobs
 # plotting the results
 
-plotdata = data.frame(s, id = 1:n,yobs,gp_mean,weight,ycorr)
+plotdata = data.frame(s, id = 1:n,yobs,gp_mean,weight,ycorr, ychol)
 datalong = reshape(plotdata, varying = colnames(plotdata)[-c(1:3)], direction = "long", v.names = 'obs', times = colnames(plotdata)[-c(1:3)])
 
 ggplot(datalong, aes(x = sx, y = sy, col = obs))+
-  geom_point(cex = 4, alpha = 0.5)+
+  geom_point(cex = 1, alpha = 0.8)+
   facet_grid(cols = vars(time))
 
 
