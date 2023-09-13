@@ -2,23 +2,81 @@
 library(MASS)
 library(ggplot2)
 #locations 
-n = 100 # datapoints
-#sx = c(runif(n/8,0,0.05),runif(n/8,0.6,1),runif(n/2,0.6,1),runif(n/4,0,0.4))
-#sy = c(runif(n/8,0,0.05),runif(n/8,0.6,1),runif(n/2,0,0.4),runif(n/4,0.6,1))
+n = 500 # datapoints
 
 # sampling x and y
 sx = runif(n)
 sy = runif(n)
 
 s = cbind(sy,sx)
+dist = sapply(1:n,function(x) sapply(1:n,function(y) sqrt(sum((s[y,]-s[x,])^2))))
 
-# creating correlation matrix
-phi = 0.002
+## simulating some data
+# possible y
 
-#range
-3/phi
+y = rep(1,n)
 
-sigma = sapply(1:n,function(x) sapply(1:n,function(y) exp(-phi*sqrt(sum((s[y,]-s[x,])^2)))))
+idx = which(sx < 0.75 & sx > 0.25 & sy >0.25 & sy < 0.75)
+
+
+y[idx[1:100]] = 3
+
+# putting a little normal noise on.
+yobs = y + rnorm(n,0,0.2)
+#yobs = y
+
+#weighting 
+range = 0.1
+phi = 3/range
+
+sigma = exp(-phi*dist)
+
+sigmanorm = diag(1/rowSums(sigma))%*%sigma
+weight = exp(c(sigmanorm%*%log(yobs)))
+
+# gaussian mean
+range = 1
+phi = 3/range
+
+sigma = exp(-phi*dist)
+
+zval = mvrnorm(n=2,yobs,sigma)
+gp_mean = colMeans(zval)
+gp_median = apply(zval,2,median)
+
+# make it correlated eigenvalue
+range = 0.05
+phi = 3/range
+sigma = exp(-phi*dist)
+eig = eigen(sigma)
+
+L = eig$vectors%*%diag(sqrt(eig$values))%*%t(eig$vectors)
+
+ycorr = L%*%yobs
+
+# make it correlated cholesky
+#range = exp(0.1)
+range = 0.1
+phi = 3/range
+sigma = exp(-phi*dist)
+chol= chol(sigma)
+
+L = eig$vectors%*%diag(sqrt(eig$values))%*%t(eig$vectors)
+
+#ychol = exp(t(chol)%*%log(yobs))
+ychol = t(chol)%*%yobs
+# plotting the results
+
+plotdata = data.frame(s, id = 1:n,yobs,gp_mean,weight,ycorr, ychol)
+datalong = reshape(plotdata, varying = colnames(plotdata)[-c(1:3)], direction = "long", v.names = 'obs', times = colnames(plotdata)[-c(1:3)])
+
+ggplot(datalong, aes(x = sx, y = sy, col = obs))+
+  geom_point(cex = 1, alpha = 0.8)+
+  facet_grid(cols = vars(time))
+
+
+
+
 
 Tdata = 1000
 #cdf_mu = rbeta(1,1,2)
@@ -33,22 +91,11 @@ ggplot(plotdata, aes(x=sx,y = sy, col = zval, label = id))+
   geom_point(cex = 2)
   geom_text(hjust = 0, vjust = 0)
 
-# possible y
-y = rep(1,n)
-
-idx = which(sx < 0.75 & sx > 0.25 & sy >0.25 & sy < 0.75)
 
 
-y[idx[1:12]] = 1.1
-
-zval_spatial = exp(colMeans(mvrnorm(n=100,y,sigma)))
-zval_independent = exp(colMeans(mvrnorm(n=100,y,diag(n))))
-
-
-plotdata = data.frame(zval,zval_ind,s, id = 1:n)
-
-ggplot(plotdata, aes(x=sx,y = sy, col = zval, label = id))+
+ggplot(plotdata, aes(x=sx,y = sy, col = zval_spatial, label = id))+
   geom_point(cex = 2)
 
-ggplot(plotdata, aes(x=sx,y = sy, col = zval_ind, label = id))+
+ggplot(plotdata, aes(x=sx,y = sy, col = zval_independent, label = id))+
   geom_point(cex = 2)
+rgamma(100,1,1)
