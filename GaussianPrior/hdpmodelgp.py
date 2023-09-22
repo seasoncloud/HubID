@@ -633,7 +633,7 @@ class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         converge = 1.0
 
         phi = np.ones((len(chunk),len(unique_words),self.m_K)) * 1.0 / self.m_K
-        var_phi = np.zeros((len(chunk),self.m_K, self.m_T))
+        #var_phi = np.zeros((len(chunk),self.m_K, self.m_T))
 
         Elogsticks_2nd = np.zeros((self.m_K, len(chunk)))
         chunk_count = np.zeros((len(chunk),len(unique_words)))
@@ -654,17 +654,17 @@ class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
             # update variational parameters
             likelihood = 0.0
 
-            for ii in range(len(chunk)):
+            # var_phi
+            if iter < 3:
+                var_phi = np.dot(phi.sum(0).T, Elogbeta_chunk.T)
+                (log_var_phi, log_norm) = matutils.ret_log_normalize_vec(var_phi)
+                var_phi = np.exp(log_var_phi)
+            else:
+                var_phi = np.dot(phi.sum(0).T, Elogbeta_chunk.T) + Elogsticks_1st
+                (log_var_phi, log_norm) = matutils.ret_log_normalize_vec(var_phi)
+                var_phi = np.exp(log_var_phi)
 
-                # var_phi
-                if iter < 3:
-                    var_phi[ii] = np.dot(phi[ii].T, Elogbeta_chunk.T)
-                    (log_var_phi, log_norm) = matutils.ret_log_normalize_vec(var_phi[ii])
-                    var_phi[ii] = np.exp(log_var_phi)
-                else:
-                    var_phi[ii] = np.dot(phi[ii].T, Elogbeta_chunk.T) + Elogsticks_1st
-                    (log_var_phi, log_norm) = matutils.ret_log_normalize_vec(var_phi[ii])
-                    var_phi[ii] = np.exp(log_var_phi)
+            for ii in range(len(chunk)):
                 # phi
                 if iter < 3:
                     phi[ii] = np.dot(var_phi[ii], Elogbeta_chunk).T
@@ -687,7 +687,7 @@ class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
                 # compute likelihood
                 # var_phi part/ C in john's notation
                 
-                likelihood += np.sum((Elogsticks_1st - log_var_phi) * var_phi[ii])
+                likelihood += np.sum((Elogsticks_1st - log_var_phi) * var_phi)
 
                 # v part/ v in john's notation, john's beta is alpha here
                 log_alpha = np.log(self.m_alpha)
@@ -699,14 +699,14 @@ class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
                 # Z part
                 likelihood += np.sum((Elogsticks_2nd[:,ii] - log_phi) * phi[ii])
                 # X part, the data part
-                likelihood += np.sum(phi[ii].T * np.dot(var_phi[ii], Elogbeta_chunk))
+                likelihood += np.sum(phi[ii].T * np.dot(var_phi, Elogbeta_chunk))
             
-            for tk in range(self.m_K):
-                var_phi[:,tk] = L @ var_phi[:,tk]
+            #for tk in range(self.m_K):
+            #    phi[:,tk] = L @ var_phi[:,tk]
             #Elogsticks_2nd = np.dot(Elogsticks_2nd,L.T)
             print(iter)
-            print(var_phi[1].round(2))
-            print(phi[1].round(2))
+            print(var_phi[0].round(2))
+            print(phi[0].round(2))
 
             converge = (likelihood - old_likelihood) / abs(old_likelihood)
             old_likelihood = likelihood
@@ -720,9 +720,9 @@ class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         #print(phi[ii].shape)
         # update the suff_stat ss
         # this time it only contains information from one doc
+        ss.m_var_sticks_ss += np.sum(var_phi,0)
         for ii in range(len(chunk)):
-            ss.m_var_sticks_ss += np.sum(var_phi[ii], 0)
-            ss.m_var_beta_ss += np.dot(var_phi[ii].T, phi[ii].T)
+            ss.m_var_beta_ss += np.dot(var_phi.T, phi[ii].T)
 
         return likelihood
 
