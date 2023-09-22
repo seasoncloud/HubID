@@ -643,6 +643,7 @@ class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
             doc_word_ids, doc_word_counts = zip(*doc)
             chunkids = [unique_words[id] for id in doc_word_ids]
             chunk_count[ii,chunkids] = doc_word_counts
+            phi[ii] = phi[ii] * np.array(chunk_count[ii])[:, np.newaxis]
 
         Elogbeta_chunk = self.m_Elogbeta[:, tuple(unique_words.keys())]
 
@@ -657,26 +658,26 @@ class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
 
                 # var_phi
                 if iter < 3:
-                    var_phi[ii] = np.dot(phi[ii].T, (Elogbeta_chunk * chunk_count[ii]).T)
+                    var_phi[ii] = np.dot(phi[ii].T, Elogbeta_chunk.T)
                     (log_var_phi, log_norm) = matutils.ret_log_normalize_vec(var_phi[ii])
                     var_phi[ii] = np.exp(log_var_phi)
                 else:
-                    var_phi[ii] = np.dot(phi[ii].T, (Elogbeta_chunk * chunk_count[ii]).T) + Elogsticks_1st
+                    var_phi[ii] = np.dot(phi[ii].T, Elogbeta_chunk.T) + Elogsticks_1st
                     (log_var_phi, log_norm) = matutils.ret_log_normalize_vec(var_phi[ii])
                     var_phi[ii] = np.exp(log_var_phi)
                 # phi
                 if iter < 3:
                     phi[ii] = np.dot(var_phi[ii], Elogbeta_chunk).T
                     (log_phi, log_norm) = matutils.ret_log_normalize_vec(phi[ii])
-                    phi[ii] = np.exp(log_phi)
+                    phi[ii] = np.exp(log_phi) * np.array(chunk_count[ii])[:, np.newaxis]
                 else:
                     phi[ii] = np.dot(var_phi[ii], Elogbeta_chunk).T + Elogsticks_2nd[:,ii]  # noqa:F821
                     (log_phi, log_norm) = matutils.ret_log_normalize_vec(phi[ii])
-                    phi[ii] = np.exp(log_phi)
+                    phi[ii] = np.exp(log_phi) * np.array(chunk_count[ii])[:, np.newaxis]
                 
 
                 # v
-                phi_all = phi[ii] * np.array(chunk_count[ii])[:, np.newaxis]
+                phi_all = phi[ii]
                 v[0] = 1.0 + np.sum(phi_all[:, :self.m_K - 1], 0)
                 phi_cum = np.flipud(np.sum(phi_all[:, 1:], 0))
                 v[1] = self.m_alpha + np.flipud(np.cumsum(phi_cum))
@@ -698,7 +699,7 @@ class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
                 # Z part
                 likelihood += np.sum((Elogsticks_2nd[:,ii] - log_phi) * phi[ii])
                 # X part, the data part
-                likelihood += np.sum(phi[ii].T * np.dot(var_phi[ii], Elogbeta_chunk * chunk_count[ii]))
+                likelihood += np.sum(phi[ii].T * np.dot(var_phi[ii], Elogbeta_chunk))
             
             for tk in range(self.m_K):
                 var_phi[:,tk] = L @ var_phi[:,tk]
@@ -721,7 +722,7 @@ class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         # this time it only contains information from one doc
         for ii in range(len(chunk)):
             ss.m_var_sticks_ss += np.sum(var_phi[ii], 0)
-            ss.m_var_beta_ss += np.dot(var_phi[ii].T, phi[ii].T * chunk_count[ii])
+            ss.m_var_beta_ss += np.dot(var_phi[ii].T, phi[ii].T)
 
         return likelihood
 
