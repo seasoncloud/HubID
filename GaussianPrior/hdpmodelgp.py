@@ -100,8 +100,8 @@ def groupondist(dist, chunksize):
     nchunks = np.ceil(n/chunksize).astype(int)
     chunkid = []
     for _ in range(nchunks-1):
-        idx = np.random.choice(x,chunksize, replace=False, p = dist[x[0],x]/sum(dist[x[0],x]))
-        #idx = np.random.choice(x,chunksize, replace=False)
+        #idx = np.random.choice(x,chunksize, replace=False, p = dist[x[0],x]/sum(dist[x[0],x]))
+        idx = np.random.choice(x,chunksize, replace=False)
         chunkid.append(idx) 
         x = np.setdiff1d(x,idx)
     
@@ -491,7 +491,8 @@ class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
                 self.m_num_docs_processed += len(chunk)
                 chunks_processed += 1
 
-                if self.update_finished(start_time, chunks_processed, i):
+                if self.update_finished(start_time, chunks_processed, self.m_num_docs_processed, i):
+                    print('finished')
                     self.update_expectations()
                     alpha, beta = self.hdp_to_lda()
                     self.lda_alpha = alpha
@@ -507,7 +508,7 @@ class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
                     self.print_topics(20)
                     logger.info('PROGRESS: finished document %i of %i', self.m_num_docs_processed, self.m_D)
 
-    def update_finished(self, start_time, chunks_processed, passes):
+    def update_finished(self, start_time, chunks_processed, docs_processed, passes):
         """Flag to determine whether the model has been updated with the new corpus or not.
 
         Parameters
@@ -535,7 +536,7 @@ class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
             or (self.max_time and time.perf_counter() - start_time > self.max_time)
 
             # no limits and whole corpus has been processed once
-            or (not self.max_chunks and not self.max_time and passes >= self.passes and self.m_num_docs_processed >= self.m_D)
+            or (not self.max_chunks and not self.max_time and passes + 1 >= self.passes and docs_processed >= self.m_D)
             )
 
     def update_chunk(self, chunk, dist, update=True, opt_o=True):
@@ -648,7 +649,7 @@ class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
         Elogbeta_chunk = self.m_Elogbeta[:, tuple(unique_words.keys())]
 
         iter = 0
-        max_iter = 100
+        max_iter = 50
         # not yet support second level optimization yet, to be done in the future
         while iter < max_iter and (converge < 0.0 or converge > var_converge):
             # update variational parameters
@@ -656,22 +657,26 @@ class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
 
             # var_phi
             if iter < 3:
-                var_phi = np.dot(phi.sum(0).T, Elogbeta_chunk.T)
+                var_phi = np.dot(phi.mean(0).T, Elogbeta_chunk.T)
                 (log_var_phi, log_norm) = matutils.ret_log_normalize_vec(var_phi)
                 var_phi = np.exp(log_var_phi)
             else:
-                var_phi = np.dot(phi.sum(0).T, Elogbeta_chunk.T) + Elogsticks_1st
+                var_phi = np.dot(phi.mean(0).T, Elogbeta_chunk.T) + Elogsticks_1st
                 (log_var_phi, log_norm) = matutils.ret_log_normalize_vec(var_phi)
                 var_phi = np.exp(log_var_phi)
+
+            # compute likelihood
+            # var_phi part/ C in john's notation
+            likelihood += np.sum((Elogsticks_1st - log_var_phi) * var_phi)
 
             for ii in range(len(chunk)):
                 # phi
                 if iter < 3:
-                    phi[ii] = np.dot(var_phi[ii], Elogbeta_chunk).T
+                    phi[ii] = np.dot(var_phi, Elogbeta_chunk).T
                     (log_phi, log_norm) = matutils.ret_log_normalize_vec(phi[ii])
                     phi[ii] = np.exp(log_phi) * np.array(chunk_count[ii])[:, np.newaxis]
                 else:
-                    phi[ii] = np.dot(var_phi[ii], Elogbeta_chunk).T + Elogsticks_2nd[:,ii]  # noqa:F821
+                    phi[ii] = np.dot(var_phi, Elogbeta_chunk).T + Elogsticks_2nd[:,ii]  # noqa:F821
                     (log_phi, log_norm) = matutils.ret_log_normalize_vec(phi[ii])
                     phi[ii] = np.exp(log_phi) * np.array(chunk_count[ii])[:, np.newaxis]
                 
@@ -683,11 +688,6 @@ class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
                 v[1] = self.m_alpha + np.flipud(np.cumsum(phi_cum))
 
                 Elogsticks_2nd[:,ii] = expect_log_sticks(v)
-
-                # compute likelihood
-                # var_phi part/ C in john's notation
-                
-                likelihood += np.sum((Elogsticks_1st - log_var_phi) * var_phi)
 
                 # v part/ v in john's notation, john's beta is alpha here
                 log_alpha = np.log(self.m_alpha)
@@ -702,11 +702,11 @@ class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
                 likelihood += np.sum(phi[ii].T * np.dot(var_phi, Elogbeta_chunk))
             
             #for tk in range(self.m_K):
-            #    phi[:,tk] = L @ var_phi[:,tk]
+            #    phi[:,tk] = L @ phi[:,tk]
             #Elogsticks_2nd = np.dot(Elogsticks_2nd,L.T)
-            print(iter)
-            print(var_phi[0].round(2))
-            print(phi[0].round(2))
+            #print(iter)
+            #print(var_phi[0].round(5))
+            #print(phi[0].round(3))
 
             converge = (likelihood - old_likelihood) / abs(old_likelihood)
             old_likelihood = likelihood
@@ -717,10 +717,9 @@ class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
             iter += 1
         
         print(iter)
-        #print(phi[ii].shape)
         # update the suff_stat ss
         # this time it only contains information from one doc
-        ss.m_var_sticks_ss += np.sum(var_phi,0)
+        ss.m_var_sticks_ss += len(chunk)*np.sum(var_phi,0)
         for ii in range(len(chunk)):
             ss.m_var_beta_ss += np.dot(var_phi.T, phi[ii].T)
 
