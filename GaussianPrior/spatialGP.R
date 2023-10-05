@@ -19,7 +19,7 @@ y = rep(1,n)
 idx = which(sx < 0.75 & sx > 0.25 & sy >0.25 & sy < 0.75)
 
 
-y[idx[1:100]] = 3
+y[idx[1:100]] = 1.1
 
 # putting a little normal noise on.
 yobs = y + rnorm(n,0,0.2)
@@ -56,7 +56,7 @@ ycorr = L%*%yobs
 
 # make it correlated cholesky
 #range = exp(0.1)
-range = 0.1
+range = 0.01
 phi = 3/range
 sigma = exp(-phi*dist)
 chol= chol(sigma)
@@ -64,7 +64,7 @@ chol= chol(sigma)
 L = eig$vectors%*%diag(sqrt(eig$values))%*%t(eig$vectors)
 
 #ychol = exp(t(chol)%*%log(yobs))
-ychol = t(chol)%*%yobs
+ychol = chol%*%yobs
 # plotting the results
 
 plotdata = data.frame(s, id = 1:n,yobs,gp_mean,weight,ycorr, ychol)
