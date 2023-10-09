@@ -93,19 +93,15 @@ def expect_log_sticks(sticks):
     Elogsticks[1:] = Elogsticks[1:] + np.cumsum(Elog1_W)
     return Elogsticks
 
-def groupondist(dist, chunksize, percentile = 0.5,random = False):
-    phi = 3/np.percentile(dist,percentile)
-    cov = np.exp(-phi*dist) + 1e-10
-    n = cov.shape[0]
+def groupondist(dist, chunksize):
+    dist = dist + 1e-10
+    n = dist.shape[0]
     x = np.array(range(n))
     nchunks = np.ceil(n/chunksize).astype(int)
     chunkid = []
     for _ in range(nchunks-1):
-        center = np.random.choice(len(x),1)
-        if random:
-            idx = np.random.choice(x,chunksize, replace=False)
-        else:
-            idx = np.random.choice(x,chunksize, replace=False, p = cov[x[center],x]/sum(cov[x[center],x]))
+        #idx = np.random.choice(x,chunksize, replace=False, p = dist[x[0],x]/sum(dist[x[0],x]))
+        idx = np.random.choice(x,chunksize, replace=False)
         chunkid.append(idx) 
         x = np.setdiff1d(x,idx)
     
@@ -189,7 +185,7 @@ class SuffStats:
         self.m_var_beta_ss.fill(0.0)
 
 
-class HdpModel_spatial(interfaces.TransformationABC, basemodel.BaseTopicModel):
+class HdpModel(interfaces.TransformationABC, basemodel.BaseTopicModel):
     r"""`Hierarchical Dirichlet Process model <http://jmlr.csail.mit.edu/proceedings/papers/v15/wang11a/wang11a.pdf>`_
 
     Topic models promise to help summarize and organize large archives of texts that cannot be easily analyzed by hand.
@@ -312,7 +308,7 @@ class HdpModel_spatial(interfaces.TransformationABC, basemodel.BaseTopicModel):
         Length of dictionary for the input corpus.
 
     """
-    def __init__(self, corpus, id2word, dist, length, passes = 1, max_chunks=None, max_time=None,
+    def __init__(self, corpus, id2word, dist, passes = 1, max_chunks=None, max_time=None,
                  chunksize=256, kappa=1.0, tau=64.0, K=15, T=150, alpha=1,
                  gamma=1, eta=0.01, scale=1.0, var_converge=0.0001,
                  outputdir=None, random_state=None):
@@ -384,7 +380,6 @@ class HdpModel_spatial(interfaces.TransformationABC, basemodel.BaseTopicModel):
         self.m_var_sticks[1] = range(T - 1, 0, -1)
         self.m_varphi_ss = np.zeros(T)
         self.dist = dist
-        self.cov = np.exp(-3/length*dist)
         self.passes = passes
 
         self.m_lambda = self.random_state.gamma(1.0, 1.0, (T, self.m_W)) * self.m_D * 100 / (T * self.m_W) - eta
@@ -409,14 +404,8 @@ class HdpModel_spatial(interfaces.TransformationABC, basemodel.BaseTopicModel):
             self.save_options()
 
         # if a training corpus was provided, start estimating the model right away
-
-    def warm_start(self,lambda_val, var_sticks, varphi):
-        self.m_lambda = lambda_val
-        self.m_var_sticks = var_sticks
-        self.m_varphi_ss = varphi
-        self.m_lambda_sum = np.sum(self.m_lambda, axis=1)
-        self.m_Elogbeta = dirichlet_expectation(self.m_eta + self.m_lambda)
-        
+        if corpus is not None:
+            self.update(corpus)
 
     def inference(self, chunk):
         """Infers the gamma value based for `chunk`.
@@ -497,14 +486,8 @@ class HdpModel_spatial(interfaces.TransformationABC, basemodel.BaseTopicModel):
         
         for i in range(self.passes):
             self.m_num_docs_processed = 0
-
-            #if i == 0:
-            #    group = groupondist(self.dist, self.chunksize, random = True)
-            #else:
-            group = groupondist(self.dist, self.chunksize)
-
-            for chunk in group:
-                self.update_chunk([corpus[i] for i in chunk],self.cov[chunk,][:,chunk])
+            for chunk in groupondist(self.dist, self.chunksize):
+                self.update_chunk([corpus[i] for i in chunk],self.dist[chunk,][:,chunk])
                 self.m_num_docs_processed += len(chunk)
                 chunks_processed += 1
 
@@ -556,7 +539,7 @@ class HdpModel_spatial(interfaces.TransformationABC, basemodel.BaseTopicModel):
             or (not self.max_chunks and not self.max_time and passes + 1 >= self.passes and docs_processed >= self.m_D)
             )
 
-    def update_chunk(self, chunk, cov, update=True, opt_o=True):
+    def update_chunk(self, chunk, dist, update=True, opt_o=True):
         """Performs lazy update on necessary columns of lambda and variational inference for documents in the chunk.
 
         Parameters
@@ -603,7 +586,7 @@ class HdpModel_spatial(interfaces.TransformationABC, basemodel.BaseTopicModel):
 
         chunk_score = self.chunk_e_step(
                     ss, Elogsticks_1st,
-                    unique_words, chunk, cov, self.m_var_converge
+                    unique_words, chunk, dist, self.m_var_converge
                 )
         count = 1
         score = chunk_score
@@ -614,7 +597,7 @@ class HdpModel_spatial(interfaces.TransformationABC, basemodel.BaseTopicModel):
 
         return score, count
 
-    def chunk_e_step(self, ss, Elogsticks_1st, unique_words, chunk, cov, var_converge):
+    def chunk_e_step(self, ss, Elogsticks_1st, unique_words, chunk, dist, var_converge):
         """Performs E step for a single doc.
 
         Parameters
@@ -639,7 +622,7 @@ class HdpModel_spatial(interfaces.TransformationABC, basemodel.BaseTopicModel):
             Computed value of likelihood for a single document.
 
         """
-        L = np.linalg.cholesky(cov)
+        L = np.linalg.cholesky(dist)
         # very similar to the hdp equations
         v = np.zeros((2, self.m_K - 1))
         v[0] = 1.0
@@ -651,7 +634,7 @@ class HdpModel_spatial(interfaces.TransformationABC, basemodel.BaseTopicModel):
         converge = 1.0
 
         phi = np.ones((len(chunk),len(unique_words),self.m_K)) * 1.0 / self.m_K
-        var_phi = np.zeros((len(chunk),self.m_K, self.m_T))
+        #var_phi = np.zeros((len(chunk),self.m_K, self.m_T))
 
         Elogsticks_2nd = np.zeros((self.m_K, len(chunk)))
         chunk_count = np.zeros((len(chunk),len(unique_words)))
@@ -666,32 +649,34 @@ class HdpModel_spatial(interfaces.TransformationABC, basemodel.BaseTopicModel):
         Elogbeta_chunk = self.m_Elogbeta[:, tuple(unique_words.keys())]
 
         iter = 0
-        max_iter = 10
+        max_iter = 50
         # not yet support second level optimization yet, to be done in the future
         while iter < max_iter and (converge < 0.0 or converge > var_converge):
             # update variational parameters
             likelihood = 0.0
 
+            # var_phi
+            if iter < 3:
+                var_phi = np.dot(phi.mean(0).T, Elogbeta_chunk.T)
+                (log_var_phi, log_norm) = matutils.ret_log_normalize_vec(var_phi)
+                var_phi = np.exp(log_var_phi)
+            else:
+                var_phi = np.dot(phi.mean(0).T, Elogbeta_chunk.T) + Elogsticks_1st
+                (log_var_phi, log_norm) = matutils.ret_log_normalize_vec(var_phi)
+                var_phi = np.exp(log_var_phi)
+
+            # compute likelihood
+            # var_phi part/ C in john's notation
+            likelihood += np.sum((Elogsticks_1st - log_var_phi) * var_phi)
+
             for ii in range(len(chunk)):
-
-                # var_phi
-                if iter < 3:
-                    var_phi[ii] = np.dot(phi[ii].T, Elogbeta_chunk.T)
-                    (log_var_phi, log_norm) = matutils.ret_log_normalize_vec(var_phi[ii])
-                    var_phi[ii] = np.exp(log_var_phi)
-                else:
-                    var_phi[ii] = np.dot(phi[ii].T, Elogbeta_chunk.T) + Elogsticks_1st
-                    (log_var_phi, log_norm) = matutils.ret_log_normalize_vec(var_phi[ii])
-                    var_phi[ii] = np.exp(log_var_phi)
-
-
                 # phi
                 if iter < 3:
-                    phi[ii] = np.dot(var_phi[ii], Elogbeta_chunk).T
+                    phi[ii] = np.dot(var_phi, Elogbeta_chunk).T
                     (log_phi, log_norm) = matutils.ret_log_normalize_vec(phi[ii])
                     phi[ii] = np.exp(log_phi) * np.array(chunk_count[ii])[:, np.newaxis]
                 else:
-                    phi[ii] = np.dot(var_phi[ii], Elogbeta_chunk).T + Elogsticks_2nd[:,ii]  # noqa:F821
+                    phi[ii] = np.dot(var_phi, Elogbeta_chunk).T + Elogsticks_2nd[:,ii]  # noqa:F821
                     (log_phi, log_norm) = matutils.ret_log_normalize_vec(phi[ii])
                     phi[ii] = np.exp(log_phi) * np.array(chunk_count[ii])[:, np.newaxis]
                 
@@ -704,10 +689,6 @@ class HdpModel_spatial(interfaces.TransformationABC, basemodel.BaseTopicModel):
 
                 Elogsticks_2nd[:,ii] = expect_log_sticks(v)
 
-                # compute likelihood
-                # var_phi part/ C in john's notation
-                likelihood += np.sum((Elogsticks_1st - log_var_phi) * var_phi[ii])
-
                 # v part/ v in john's notation, john's beta is alpha here
                 log_alpha = np.log(self.m_alpha)
                 likelihood += (self.m_K - 1) * log_alpha
@@ -718,16 +699,14 @@ class HdpModel_spatial(interfaces.TransformationABC, basemodel.BaseTopicModel):
                 # Z part
                 likelihood += np.sum((Elogsticks_2nd[:,ii] - log_phi) * phi[ii])
                 # X part, the data part
-                likelihood += np.sum(phi[ii].T * np.dot(var_phi[ii], Elogbeta_chunk))
+                likelihood += np.sum(phi[ii].T * np.dot(var_phi, Elogbeta_chunk))
             
             #for tk in range(self.m_K):
-            #    var_phi[:,tk] = L @ var_phi[:,tk]
-            #    phi[:,:,tk] = L @ phi[:,:,tk]
+            #    phi[:,tk] = L @ phi[:,tk]
             #Elogsticks_2nd = np.dot(Elogsticks_2nd,L.T)
             #print(iter)
             #print(var_phi[0].round(5))
             #print(phi[0].round(3))
-            
 
             converge = (likelihood - old_likelihood) / abs(old_likelihood)
             old_likelihood = likelihood
@@ -740,17 +719,9 @@ class HdpModel_spatial(interfaces.TransformationABC, basemodel.BaseTopicModel):
         print(iter)
         # update the suff_stat ss
         # this time it only contains information from one doc
-        overall_phi = np.zeros((len(chunk), self.m_T, len(unique_words)))
+        ss.m_var_sticks_ss += len(chunk)*np.sum(var_phi,0)
         for ii in range(len(chunk)):
-            ss.m_var_sticks_ss += np.sum(var_phi[ii],0)
-            overall_phi[ii] = np.log(np.dot(var_phi[ii].T, phi[ii].T) + 1e-50)
-        
-
-        for tk in range(len(unique_words)):
-            overall_phi[:,:,tk] = np.exp(L @ overall_phi[:,:,tk])
-        
-        ss.m_var_beta_ss += overall_phi.sum(0)
-        #ss.m_var_beta_ss += np.dot(var_phi[ii].T, phi[ii].T)
+            ss.m_var_beta_ss += np.dot(var_phi.T, phi[ii].T)
 
         return likelihood
 

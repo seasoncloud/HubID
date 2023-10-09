@@ -93,10 +93,9 @@ def expect_log_sticks(sticks):
     Elogsticks[1:] = Elogsticks[1:] + np.cumsum(Elog1_W)
     return Elogsticks
 
-def groupondist(dist, chunksize, percentile = 0.5,random = False):
-    phi = 3/np.percentile(dist,percentile)
-    cov = np.exp(-phi*dist) + 1e-10
-    n = cov.shape[0]
+def groupondist(dist, chunksize, random = False):
+    dist = dist + 1e-10
+    n = dist.shape[0]
     x = np.array(range(n))
     nchunks = np.ceil(n/chunksize).astype(int)
     chunkid = []
@@ -105,7 +104,7 @@ def groupondist(dist, chunksize, percentile = 0.5,random = False):
         if random:
             idx = np.random.choice(x,chunksize, replace=False)
         else:
-            idx = np.random.choice(x,chunksize, replace=False, p = cov[x[center],x]/sum(cov[x[center],x]))
+            idx = np.random.choice(x,chunksize, replace=False, p = dist[x[center],x]/sum(dist[x[center],x]))
         chunkid.append(idx) 
         x = np.setdiff1d(x,idx)
     
@@ -312,7 +311,7 @@ class HdpModel_spatial(interfaces.TransformationABC, basemodel.BaseTopicModel):
         Length of dictionary for the input corpus.
 
     """
-    def __init__(self, corpus, id2word, dist, length, passes = 1, max_chunks=None, max_time=None,
+    def __init__(self, corpus, id2word, dist, passes = 1, max_chunks=None, max_time=None,
                  chunksize=256, kappa=1.0, tau=64.0, K=15, T=150, alpha=1,
                  gamma=1, eta=0.01, scale=1.0, var_converge=0.0001,
                  outputdir=None, random_state=None):
@@ -384,7 +383,6 @@ class HdpModel_spatial(interfaces.TransformationABC, basemodel.BaseTopicModel):
         self.m_var_sticks[1] = range(T - 1, 0, -1)
         self.m_varphi_ss = np.zeros(T)
         self.dist = dist
-        self.cov = np.exp(-3/length*dist)
         self.passes = passes
 
         self.m_lambda = self.random_state.gamma(1.0, 1.0, (T, self.m_W)) * self.m_D * 100 / (T * self.m_W) - eta
@@ -504,7 +502,7 @@ class HdpModel_spatial(interfaces.TransformationABC, basemodel.BaseTopicModel):
             group = groupondist(self.dist, self.chunksize)
 
             for chunk in group:
-                self.update_chunk([corpus[i] for i in chunk],self.cov[chunk,][:,chunk])
+                self.update_chunk([corpus[i] for i in chunk],self.dist[chunk,][:,chunk])
                 self.m_num_docs_processed += len(chunk)
                 chunks_processed += 1
 
@@ -556,7 +554,7 @@ class HdpModel_spatial(interfaces.TransformationABC, basemodel.BaseTopicModel):
             or (not self.max_chunks and not self.max_time and passes + 1 >= self.passes and docs_processed >= self.m_D)
             )
 
-    def update_chunk(self, chunk, cov, update=True, opt_o=True):
+    def update_chunk(self, chunk, dist, update=True, opt_o=True):
         """Performs lazy update on necessary columns of lambda and variational inference for documents in the chunk.
 
         Parameters
@@ -603,7 +601,7 @@ class HdpModel_spatial(interfaces.TransformationABC, basemodel.BaseTopicModel):
 
         chunk_score = self.chunk_e_step(
                     ss, Elogsticks_1st,
-                    unique_words, chunk, cov, self.m_var_converge
+                    unique_words, chunk, dist, self.m_var_converge
                 )
         count = 1
         score = chunk_score
@@ -614,7 +612,7 @@ class HdpModel_spatial(interfaces.TransformationABC, basemodel.BaseTopicModel):
 
         return score, count
 
-    def chunk_e_step(self, ss, Elogsticks_1st, unique_words, chunk, cov, var_converge):
+    def chunk_e_step(self, ss, Elogsticks_1st, unique_words, chunk, dist, var_converge):
         """Performs E step for a single doc.
 
         Parameters
@@ -639,7 +637,7 @@ class HdpModel_spatial(interfaces.TransformationABC, basemodel.BaseTopicModel):
             Computed value of likelihood for a single document.
 
         """
-        L = np.linalg.cholesky(cov)
+        L = np.linalg.cholesky(dist)
         # very similar to the hdp equations
         v = np.zeros((2, self.m_K - 1))
         v[0] = 1.0
