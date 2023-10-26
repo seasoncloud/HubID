@@ -208,29 +208,89 @@ List nmfspatial(arma::mat data, int noSignatures, arma::mat weight, int maxiter 
       break;
     }
     gklOld = gklNew;
-
-    //if(t - floor(t/10)*10 == 0){
-    //  Rcout << "Iteration ";
-    //  Rcout << t << "\n";
-    //}
-    
-    // if(t - floor(t/10)*10 == 0 || t < 200){
-    //   for(int r = 0; r<noSignatures; r++) {
-    //     if(range(exposures.col(r)) <= 1e-10){
-    //       Rcout << "collaps";
-    //       exposures.col(r) = arma::randu(genomes);
-    //       signatures.row(r) = arma::randu(mutTypes);
-    //       
-    //     }
-    //     
-    //   }
-    //}
     
   }
   
-  //arma::colvec rsum = sum(signatures,1);
-  //exposures = exposures.each_row() % arma::trans(rsum);
-  //signatures = signatures.each_col() / rsum;
+  
+  List output = List::create(Named("exposures") = exposures,
+                             Named("signatures") = signatures,
+                             Named("gkl") = gklNew,
+                             Named("gklvalues") = gklvalues);
+  return output;
+}
+
+
+
+
+// [[Rcpp::export]]
+List nmfspatialbatch(arma::mat data, int noSignatures, List weight, List batch, int maxiter = 10000, double tolerance = 1e-8, int initial = 10, int smallIter = 100) {
+  
+  int nobatches = batch.size();
+  arma::colvec obs_sum = sum(data,1);
+  
+  auto res = nmf1(data, noSignatures, smallIter);
+  auto exposures = std::get<0>(res);
+  auto signatures = std::get<1>(res);
+  auto gklValue = std::get<2>(res);
+  
+  for(int i = 1; i < initial; i++){
+    auto res = nmf1(data, noSignatures, smallIter);
+    auto gklNew = std::get<2>(res);
+    
+    if(gklNew < gklValue){
+      gklValue = gklNew;
+      exposures = std::get<0>(res);
+      signatures = std::get<1>(res);
+      
+    }
+  }
+  
+  arma::mat estimate = exposures * signatures;
+  arma::mat fraq = data/estimate;
+  
+  double gklOld = error(arma::vectorise(data),arma::vectorise(estimate));
+  double gklNew = 2*gklOld;
+  arma::vec gklvalues(maxiter);
+
+  for(int t = 0; t < maxiter; t++){
+
+    signatures = signatures % (arma::trans(exposures) * fraq);
+    signatures = arma::normalise(signatures,1,1);
+    
+    signatures.transform( [](double val) {return (val < 1e-10) ? 1e-10 : val; } );
+
+    for(int b=0; b < nobatches; b++){
+      arma::mat data_batch = data.rows(batch[b]);
+      arma::mat exposure_batch = exposures.rows(batch[b]);
+      arma::mat estimate_batch = exposure_batch * signatures;
+
+      exposures_batch = exposures_batch % ((data_batch/estimate_batch) * arma::trans(signatures));
+      arma::colvec exp_sum = sum(exposures_batch,1);
+      exposures_batch = exposures_batch.each_col() / exp_sum;
+      exposures_batch = weight[b] * exposures_batch;
+      exposures_batch = exposures_batch.each_col() % exp_sum;
+
+      exposures_batch.transform( [](double val) {return (val < 1e-10) ? 1e-10 : val; } );
+
+      exposures.rows(batch[b]) = exposures_batch;
+    }
+    
+    estimate = exposures * signatures;
+    fraq = data/estimate;
+
+    gklvalues.at(t) = gklOld;
+    
+    gklNew = error(arma::vectorise(data),arma::vectorise(estimate));
+    
+    if (2*std::abs(gklOld - gklNew)/(0.1 + std::abs(2*gklNew)) < tolerance){
+      Rcout << "Total iterations:";
+      Rcout << t;
+      Rcout << "\n";
+      break;
+    }
+    gklOld = gklNew;
+    
+  }
   
   
   List output = List::create(Named("exposures") = exposures,
