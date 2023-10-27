@@ -149,9 +149,6 @@ List nmftrain(arma::mat data, arma::mat exposures, arma::mat signatures, arma::m
 // [[Rcpp::export]]
 List nmfspatial(arma::mat data, int noSignatures, arma::mat weight, int maxiter = 10000, double tolerance = 1e-8, int initial = 100, int smallIter = 500) {
   
-
-  arma::colvec obs_sum = sum(data,1);
-  
   auto res = nmf1(data, noSignatures, smallIter);
   auto exposures = std::get<0>(res);
   auto signatures = std::get<1>(res);
@@ -220,13 +217,13 @@ List nmfspatial(arma::mat data, int noSignatures, arma::mat weight, int maxiter 
 }
 
 
-
-
 // [[Rcpp::export]]
 List nmfspatialbatch(arma::mat data, int noSignatures, List weight, List batch, int maxiter = 10000, double tolerance = 1e-8, int initial = 10, int smallIter = 100) {
   
   int nobatches = batch.size();
-  arma::colvec obs_sum = sum(data,1);
+  arma::vec w1 = weight[1];
+  arma::vec b1 = batch[1];
+  
   
   auto res = nmf1(data, noSignatures, smallIter);
   auto exposures = std::get<0>(res);
@@ -259,20 +256,22 @@ List nmfspatialbatch(arma::mat data, int noSignatures, List weight, List batch, 
     
     signatures.transform( [](double val) {return (val < 1e-10) ? 1e-10 : val; } );
 
-    for(int b=0; b < nobatches; b++){
-      arma::mat data_batch = data.rows(batch[b]);
-      arma::mat exposure_batch = exposures.rows(batch[b]);
-      arma::mat estimate_batch = exposure_batch * signatures;
+      for(int b=0; b < nobatches; b++){
+      arma::uvec batch_index = batch[b];
+      arma::mat w_mat = weight[b];
+      arma::mat data_batch = data.rows(batch_index);
+      arma::mat exposures_batch = exposures.rows(batch_index);
+      arma::mat estimate_batch = exposures_batch * signatures;
 
       exposures_batch = exposures_batch % ((data_batch/estimate_batch) * arma::trans(signatures));
       arma::colvec exp_sum = sum(exposures_batch,1);
       exposures_batch = exposures_batch.each_col() / exp_sum;
-      exposures_batch = weight[b] * exposures_batch;
+      exposures_batch = w_mat * exposures_batch;
       exposures_batch = exposures_batch.each_col() % exp_sum;
 
       exposures_batch.transform( [](double val) {return (val < 1e-10) ? 1e-10 : val; } );
 
-      exposures.rows(batch[b]) = exposures_batch;
+      exposures.rows(batch_index) = exposures_batch;
     }
     
     estimate = exposures * signatures;
@@ -298,4 +297,6 @@ List nmfspatialbatch(arma::mat data, int noSignatures, List weight, List batch, 
                              Named("gkl") = gklNew,
                              Named("gklvalues") = gklvalues);
   return output;
+
 }
+

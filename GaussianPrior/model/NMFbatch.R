@@ -1,11 +1,14 @@
 # Function for batch updates of spatial nmf
+library(Rcpp)
+library(RcppArmadillo)
+sourceCpp("model/NMFspatial2.cpp")
 
-nmfspatial_batch = function(data, noSignatures, location, batch, maxiter = 10000, tolerance = 1e-8, initial = 5, smallIter = 100){
+nmfspatial_batch = function(data, noSignatures, location, lengthscale, batch, maxiter = 10000, tolerance = 1e-8, initial = 5, smallIter = 100){
     weights = list()
     batch_list = list()
     for(i in unique(batch)){
         index = which(batch == i)
-        batch_list[[i]] = index
+        batch_list[[i]] = index - 1
 
         X = location[index,]
         X2 = rowSums(X^2)
@@ -17,15 +20,15 @@ nmfspatial_batch = function(data, noSignatures, location, batch, maxiter = 10000
         }
         
         dist = sqrt(r)
+        
+        # calculating covariance
+        sigma = exp(-dist/lengthscale)
+        sigma[sigma < 0.5] = 0
 
-        weight[[i]] = dist
+        weights[[i]] = sigma/rowSums(sigma)
     }
 
-    out = list
-    out$b = batch_list
-    out$w = weights
+    out = nmfspatialbatch(data = data, noSignatures = noSignatures, weight = weights, batch = batch_list, maxiter = maxiter, tolerance = tolerance, initial = initial, smallIter = smallIter)
 
-    return(out)
-
-    
+    return(out)  
 }
