@@ -6,7 +6,11 @@ sourceCpp("model/NMFspatial2.cpp")
 nmfspatial_batch = function(data, noSignatures, location, lengthscale, batch, maxiter = 10000, tolerance = 1e-8, initial = 5, smallIter = 100){
     weights = list()
     batch_list = list()
-    for(i in unique(batch)){
+    unique_batches = unique(batch)
+    if(length(unique_batches) == 1){
+        stop("Everything in the same batch. Use the nmfspatial function instead.")
+    }
+    for(i in unique_batches){
         index = which(batch == i)
         batch_list[[i]] = index - 1
 
