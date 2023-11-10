@@ -218,7 +218,7 @@ List nmfspatial(arma::mat data, int noSignatures, arma::mat weight, int maxiter 
 
 
 // [[Rcpp::export]]
-List nmfspatialbatch(arma::mat data, int noSignatures, List weight, List batch, int maxiter = 10000, double tolerance = 1e-8, int initial = 10, int smallIter = 100) {
+List nmfspatialbatch(arma::mat data, int noSignatures, List weight, List batch, int maxiter = 10000, double tolerance = 1e-8, int initial = 10, int smallIter = 100, int error_freq = 1) {
   
   int nobatches = batch.size();
   arma::vec w1 = weight[1];
@@ -279,15 +279,17 @@ List nmfspatialbatch(arma::mat data, int noSignatures, List weight, List batch, 
 
     gklvalues.at(t) = gklOld;
     
-    gklNew = error(arma::vectorise(data),arma::vectorise(estimate));
+    if(t - floor(t/error_freq)*error_freq == 0){
+      gklNew = error(arma::vectorise(data),arma::vectorise(estimate));
     
-    if (2*std::abs(gklOld - gklNew)/(0.1 + std::abs(2*gklNew)) < tolerance){
-      Rcout << "Total iterations:";
-      Rcout << t;
-      Rcout << "\n";
-      break;
+      if (2*std::abs(gklOld - gklNew)/(0.1 + std::abs(2*gklNew)) < tolerance){
+        Rcout << "Total iterations:";
+        Rcout << t;
+        Rcout << "\n";
+        break;
+      }
+      gklOld = gklNew;
     }
-    gklOld = gklNew;
     
   }
   
