@@ -28,8 +28,5 @@ n = nrow(location)
 
 batch_id = groupondist(location,150)
 
-out = nmfspatial_batch(count, 20, location = location, batch = batch_id, lengthscale = 100, initial = 1, smallIter = 500, maxiter = 5000, tolerance = 1e-10)
-save(out, file = paste0("modelssaved/cellpose_f20_b150_l100_1e10.RData"))
-
-
-
+out = nmfspatial_batch(count, 20, location = location, batch = batch_id, lengthscale = 300, initial = 1, smallIter = 500, maxiter = 3000, tolerance = 1e-10, freq_error = 100)
+save(out, file = paste0("modelssaved/cellpose_f20_b150_l300_1e10.RData"))

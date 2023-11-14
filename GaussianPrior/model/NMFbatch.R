@@ -48,7 +48,7 @@ groupondist = function(location,no_groups, size = NULL){
     return(batch_vec)
 }
 
-nmfspatial_batch = function(data, noSignatures, location, lengthscale, batch = 1, maxiter = 10000, tolerance = 1e-8, initial = 5, smallIter = 100){
+nmfspatial_batch = function(data, noSignatures, location, lengthscale, batch = 1, maxiter = 10000, tolerance = 1e-8, initial = 5, smallIter = 100, freq_error = 100){
 
     unique_batches = unique(batch)
     if(length(unique_batches) == 1){
@@ -82,7 +82,7 @@ nmfspatial_batch = function(data, noSignatures, location, lengthscale, batch = 1
             weights[[i]] = sigma/rowSums(sigma)
         }
 
-    out = nmfspatialbatch(data = data, noSignatures = noSignatures, weight = weights, batch = batch_list, maxiter = maxiter, tolerance = tolerance, initial = initial, smallIter = smallIter)
+    out = nmfspatialbatch(data = data, noSignatures = noSignatures, weight = weights, batch = batch_list, maxiter = maxiter, tolerance = tolerance, initial = initial, smallIter = smallIter, freq_error = freq_error)
 
     }
     
