@@ -21,10 +21,6 @@ double error(arma::colvec y, arma::colvec mu) {
   return sum;
 }
 
-arma::mat UpdateExp(arma::mat data, arma::mat exposures, arma::mat signatures){
-
-}
-
 // [[Rcpp::export]]
 List nmfgen(arma::mat data, int noSignatures, int iter = 5000) {
   int genomes = data.n_rows;
@@ -216,9 +212,8 @@ List nmfspatial(arma::mat data, int noSignatures, arma::mat weight, int maxiter 
   return output;
 }
 
-
 // [[Rcpp::export]]
-List nmfspatialbatch(arma::mat data, int noSignatures, List weight, List batch, int maxiter = 10000, double tolerance = 1e-8, int initial = 10, int smallIter = 100, int error_freq = 1) {
+List nmfspatialbatch(arma::mat data, int noSignatures, List weight, List batch, int maxiter = 10000, double tolerance = 1e-8, int initial = 10, int smallIter = 100, int error_freq = 10) {
   
   int nobatches = batch.size();
   arma::vec w1 = weight[1];
@@ -243,7 +238,6 @@ List nmfspatialbatch(arma::mat data, int noSignatures, List weight, List batch, 
   }
   
   arma::mat estimate = exposures * signatures;
-  arma::mat fraq = data/estimate;
   
   double gklOld = error(arma::vectorise(data),arma::vectorise(estimate));
   double gklNew = 2*gklOld;
@@ -251,31 +245,31 @@ List nmfspatialbatch(arma::mat data, int noSignatures, List weight, List batch, 
 
   for(int t = 0; t < maxiter; t++){
 
-    signatures = signatures % (arma::trans(exposures) * fraq);
+    signatures = signatures % (arma::trans(exposures) * (data/estimate));
     signatures = arma::normalise(signatures,1,1);
     
     signatures.transform( [](double val) {return (val < 1e-10) ? 1e-10 : val; } );
 
-      for(int b=0; b < nobatches; b++){
+    estimate = exposures * signatures;
+
+    exposures = exposures % ((data/estimate) * arma::trans(signatures));
+
+    for(int b=0; b < nobatches; b++){
       arma::uvec batch_index = batch[b];
       arma::mat w_mat = weight[b];
-      arma::mat data_batch = data.rows(batch_index);
       arma::mat exposures_batch = exposures.rows(batch_index);
-      arma::mat estimate_batch = exposures_batch * signatures;
-
-      exposures_batch = exposures_batch % ((data_batch/estimate_batch) * arma::trans(signatures));
+      
       arma::colvec exp_sum = sum(exposures_batch,1);
       exposures_batch = exposures_batch.each_col() / exp_sum;
       exposures_batch = w_mat * exposures_batch;
       exposures_batch = exposures_batch.each_col() % exp_sum;
 
-      exposures_batch.transform( [](double val) {return (val < 1e-10) ? 1e-10 : val; } );
-
       exposures.rows(batch_index) = exposures_batch;
     }
     
+    exposures.transform( [](double val) {return (val < 1e-10) ? 1e-10 : val; } );
+
     estimate = exposures * signatures;
-    fraq = data/estimate;
 
     gklvalues.at(t) = gklOld;
     
@@ -293,6 +287,7 @@ List nmfspatialbatch(arma::mat data, int noSignatures, List weight, List batch, 
     
   }
   
+  gklNew = error(arma::vectorise(data),arma::vectorise(estimate));
   
   List output = List::create(Named("exposures") = exposures,
                              Named("signatures") = signatures,
@@ -301,4 +296,3 @@ List nmfspatialbatch(arma::mat data, int noSignatures, List weight, List batch, 
   return output;
 
 }
-
