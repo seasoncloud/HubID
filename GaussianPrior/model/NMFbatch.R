@@ -12,7 +12,7 @@ dist_fun = function(X){
         r[r<0] = 0
     }
         
-    return(sqrt(r))
+    return(r)
 }
 
 dist_index = function(X,index){
@@ -21,38 +21,43 @@ dist_index = function(X,index){
     if(any(r<0)){
         warning("Some distances were smaller than zero! Try scaling up the locations.")
         r[r<0] = 0
-    }
-        
-    return(sqrt(r))
+    } 
+    return(r)
 }
 
 groupondist = function(location, size = NULL, no_groups = NULL){
     n = nrow(location)
     left = c(1:n)
+
     if(is.null(no_groups) & is.null(size)){
         stop("You must determine the size or number of groups")
     }
+
     if(is.null(size)){
         size = ceiling(n/no_groups)
     }
-    
+
     i = 1
     batch_vec = rep(paste0("b",0),n)
-    while(length(left) > size){   
+    while(length(left) > size){ 
         start = sample(length(left),1)
-        prob = exp(-1/500*dist_index(location[left,],start)) 
-        batch_index = sample(left,size,prob = prob)
-        batch_vec[batch_index] = paste0("b",i)
+        dist = dist_index(location[left,],start)
+        batch_index = order(dist)[1:size]
+        batch_vec[left[batch_index]] = paste0("b",i)
         i = i+1
         
-        left = setdiff(left,batch_index)
-
+        left = left[-batch_index]
     }
     return(batch_vec)
 }
 
-nmfspatial_batch = function(data, noSignatures, location, lengthscale, batch = 1, maxiter = 10000, tolerance = 1e-8, initial = 5, smallIter = 100, error_freq = 10){
-
+nmfspatial_batch = function(data, noSignatures, location, lengthscale, batch = 1, maxiter = 10000, tolerance = 1e-8, initial = 5, smallIter = 100, error_freq = 10,kernel_cutoff = 0.5,normalize = TRUE){
+    
+    if(normalize){
+        row_sum = rowSums(data)
+        data = data/row_sum*mean(row_sum)
+    }
+    
     unique_batches = unique(batch)
     if(length(unique_batches) == 1){
         print("Everything is run in one batch")
@@ -60,8 +65,8 @@ nmfspatial_batch = function(data, noSignatures, location, lengthscale, batch = 1
         dist = dist_fun(location)
         
         # calculating covariance
-        sigma = exp(-dist/lengthscale)
-        sigma[sigma < 0.5] = 0
+        sigma = exp(-dist/(lengthscale^2))
+        sigma[sigma < kernel_cutoff] = 0
 
         weight = sigma/rowSums(sigma)
 
@@ -79,15 +84,19 @@ nmfspatial_batch = function(data, noSignatures, location, lengthscale, batch = 1
             dist = dist_fun(X)
         
             # calculating covariance
-            sigma = exp(-dist/lengthscale)
-            sigma[sigma < 0.5] = 0
+            sigma = exp(-dist/(lengthscale^2))
+            sigma[sigma < kernel_cutoff] = 0
 
             weights[[i]] = sigma/rowSums(sigma)
         }
 
-    out = nmfspatialbatch(data = data, noSignatures = noSignatures, weight = weights, batch = batch_list, maxiter = maxiter, tolerance = tolerance, initial = initial, smallIter = smallIter, error_freq = error_freq)
+        if(initial == 1){
+            out = nmfspatialbatch2(data = data, noSignatures = noSignatures, weight = weights, batch = batch_list, maxiter = maxiter, tolerance = tolerance, error_freq = error_freq)
+        }else{
+            out = nmfspatialbatch(data = data, noSignatures = noSignatures, weight = weights, batch = batch_list, maxiter = maxiter, tolerance = tolerance, initial = initial, smallIter = smallIter, error_freq = error_freq)
+        }
 
     }
     
-    return(out)  
+    return(out)
 }

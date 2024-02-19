@@ -36,6 +36,10 @@ List nmfgen(arma::mat data, int noSignatures, int iter = 5000) {
   for(int t = 0; t < iter; t++){
 
     signatures = signatures % (arma::trans(exposures) * fraq);
+    if(signatures.has_nan()){
+          Rcout << t << "Nan values in signature after update \n";
+          break;
+      }
     signatures = arma::normalise(signatures,1,1);
     
     signatures.transform( [](double val) {return (val < 1e-10) ? 1e-10 : val; } );
@@ -216,9 +220,6 @@ List nmfspatial(arma::mat data, int noSignatures, arma::mat weight, int maxiter 
 List nmfspatialbatch(arma::mat data, int noSignatures, List weight, List batch, int maxiter = 10000, double tolerance = 1e-8, int initial = 10, int smallIter = 100, int error_freq = 10) {
   
   int nobatches = batch.size();
-  arma::vec w1 = weight[1];
-  arma::vec b1 = batch[1];
-  
   
   auto res = nmf1(data, noSignatures, smallIter);
   auto exposures = std::get<0>(res);
@@ -275,6 +276,110 @@ List nmfspatialbatch(arma::mat data, int noSignatures, List weight, List batch, 
     
     if(t - floor(t/error_freq)*error_freq == 0){
       gklNew = error(arma::vectorise(data),arma::vectorise(estimate));
+    
+      if (2*std::abs(gklOld - gklNew)/(0.1 + std::abs(2*gklNew)) < tolerance){
+        Rcout << "Total iterations:";
+        Rcout << t;
+        Rcout << "\n";
+        break;
+      }
+      gklOld = gklNew;
+    }
+    
+  }
+  
+  gklNew = error(arma::vectorise(data),arma::vectorise(estimate));
+  
+  List output = List::create(Named("exposures") = exposures,
+                             Named("signatures") = signatures,
+                             Named("gkl") = gklNew,
+                             Named("gklvalues") = gklvalues);
+  return output;
+
+}
+
+// [[Rcpp::export]]
+List nmfspatialbatch2(arma::mat data, int noSignatures, List weight, List batch, int maxiter = 10000, double tolerance = 1e-8, int error_freq = 10) {
+  
+  int nobatches = batch.size();
+  
+  int genomes = data.n_rows;
+  int mutTypes = data.n_cols;
+
+  arma::mat exposures(genomes, noSignatures,arma::fill::randu);
+  
+  arma::mat signatures(noSignatures, mutTypes, arma::fill::randu);
+  
+  arma::mat estimate = exposures * signatures;
+
+  arma::mat fraq = data/estimate;
+
+  double gklOld = error(arma::vectorise(data),arma::vectorise(estimate));
+  double gklNew = 2*gklOld;
+  arma::vec gklvalues(maxiter);
+
+    if(estimate.has_nan()){
+          Rcout << "Nan values in estimate \n";
+      }
+      if(fraq.has_nan()){
+          Rcout << "Nan values in data/estimate \n";
+      }
+
+  for(int t = 0; t < maxiter; t++){
+
+
+    signatures = signatures % (arma::trans(exposures) * fraq);
+    if(signatures.has_nan()){
+          Rcout << t << "Nan values in signature after update \n";
+          break;
+      }
+    signatures = arma::normalise(signatures,1,1);
+
+    signatures.transform( [](double val) {return (val < 1e-10) ? 1e-10 : val; } );
+
+    estimate = exposures * signatures;
+    fraq = data/estimate;
+
+    estimate.transform( [](double val) {return (val < 1e-10) ? 1e-10 : val; } );
+
+    exposures = exposures % (fraq * arma::trans(signatures));
+    if(exposures.has_nan()){
+          Rcout << t << "Nan values in exposure \n";
+          break;
+      }
+
+    exposures.transform( [](double val) {return (val < 1e-10) ? 1e-10 : val; } );
+    for(int b=0; b < nobatches; b++){
+      arma::uvec batch_index = batch[b];
+      arma::mat w_mat = weight[b];
+      arma::mat exposures_batch = exposures.rows(batch_index);
+
+      arma::colvec exp_sum = sum(exposures_batch,1);
+      exposures_batch = exposures_batch.each_col() / exp_sum;
+      
+      exposures_batch = w_mat * exposures_batch;
+      
+      exposures_batch = exposures_batch.each_col() % exp_sum;
+      if(exposures_batch.has_nan()){
+          Rcout << t << "Nan values in batch \n";
+          break;
+      }
+      exposures.rows(batch_index) = exposures_batch;
+    }
+    
+    estimate = exposures * signatures;
+    fraq = data/estimate;
+    estimate.transform( [](double val) {return (val < 1e-10) ? 1e-10 : val; } );
+
+    gklvalues.at(t) = gklOld;
+    
+    if(t - floor(t/error_freq)*error_freq == 0){
+      gklNew = error(arma::vectorise(data),arma::vectorise(estimate));
+      Rcout << "Total iterations:";
+      Rcout << t;
+      Rcout << "  error:";
+      Rcout << gklNew;
+      Rcout << "\n";
     
       if (2*std::abs(gklOld - gklNew)/(0.1 + std::abs(2*gklNew)) < tolerance){
         Rcout << "Total iterations:";
