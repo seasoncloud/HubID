@@ -6,8 +6,7 @@ source("model/NMFbatch.R")
 count = read.csv('data/data_mf/tonsil_protein.csv', header = T, row.names = 1)
 count = as.matrix(count)
 
-range(rowSums(count))
-
+# load locations
 location = read.csv('data/data_mf/tonsil_location.csv', row.names = 1)
 location = as.matrix(location)
 
@@ -18,6 +17,8 @@ density = round(density,0)
 density = density/10
 print(density)
 density = 20
+
+# divide into batches of 20000 observations
 batch_id = groupondist(location,size = 20000)
 
 # start = Sys.time()
